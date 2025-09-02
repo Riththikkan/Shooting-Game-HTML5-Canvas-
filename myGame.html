@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Shooting Game</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%}
+    body{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:#0b0b0f;
+      font-family:Arial,Helvetica,sans-serif;
+      color:#eee;
+    }
+    canvas{
+      background:#1a1a1a;
+      border:3px solid #fff;
+      display:block;
+    }
+    .hint{
+      position:fixed;
+      bottom:12px;
+      left:50%;
+      transform:translateX(-50%);
+      color:#ddd;
+      font-size:13px;
+      opacity:.9;
+      pointer-events:none;
+    }
+    .menu{
+      position:fixed;
+      top:50%;
+      left:50%;
+      transform:translate(-50%,-50%);
+      background:rgba(0,0,0,0.85);
+      padding:20px;
+      border:2px solid #fff;
+      border-radius:10px;
+      display:none;
+      flex-direction:column;
+      align-items:center;
+      gap:10px;
+    }
+    .menu button{
+      padding:10px 20px;
+      font-size:16px;
+      border:none;
+      border-radius:5px;
+      cursor:pointer;
+      background:#444;
+      color:#fff;
+      transition:background 0.3s;
+    }
+    .menu button:hover{background:#666;}
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="400" height="600" tabindex="0"></canvas>
+  <div class="hint">Click canvas, ← → move, Space shoot, Enter restart, Esc pause</div>
+  <div id="menu" class="menu">
+    <h2>Game Paused</h2>
+    <button id="resumeBtn">Resume</button>
+    <button id="restartBtn">Restart</button>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const menu = document.getElementById('menu');
+  const resumeBtn = document.getElementById('resumeBtn');
+  const restartBtn = document.getElementById('restartBtn');
+
+  const W = canvas.width, H = canvas.height;
+  const player = { w:40, h:20, x:(W-40)/2, y:H-50, speed:220 };
+
+  let bullets = [], enemies = [], keys = {};
+  let score = 0, lastTime = 0, lastShot = 0, lastSpawn = 0;
+  let spawnInterval = 900, shotCooldown = 180;
+  let gameOver = false, paused = false;
+  let gameStartTime = performance.now();
+
+  const shootSound = new Audio("https://actions.google.com/sounds/v1/weapons/medium_gunshot.ogg");
+  const hitSound = new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg");
+  const gameOverSound = new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg");
+
+  function rectsOverlap(a,b){
+    return !(a.x+a.w<=b.x||b.x+b.w<=a.x||a.y+a.h<=b.y||b.y+b.h<=a.y);
+  }
+
+  document.addEventListener('keydown', e=>{
+    keys[e.code]=true;
+    if(['ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+    if(gameOver && e.code==='Enter') resetGame();
+    if(e.code==='Escape') togglePause();
+  });
+  document.addEventListener('keyup', e=>{
+    keys[e.code]=false;
+    if(['ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+  });
+  canvas.addEventListener('click',()=>canvas.focus());
+
+  resumeBtn.addEventListener('click', togglePause);
+  restartBtn.addEventListener('click', ()=>{resetGame(); togglePause(false);});
+
+  function togglePause(forceState){
+    paused = typeof forceState === 'boolean' ? forceState : !paused;
+    menu.style.display = paused ? 'flex' : 'none';
+  }
+
+  function shoot(now){
+    if(now-lastShot<shotCooldown) return;
+    bullets.push({x:player.x+player.w/2-3,y:player.y-8,w:6,h:12,speed:420});
+    lastShot=now;
+    shootSound.currentTime=0; shootSound.play();
+  }
+
+  function spawnEnemy(){
+    const w=24+Math.random()*16;
+    enemies.push({x:Math.random()*(W-w),y:-32,w,h:24,speed:60+Math.random()*80});
+  }
+
+  function update(dt,now){
+    if(gameOver || paused) return;
+
+    if(keys['ArrowLeft']) player.x-=player.speed*dt;
+    if(keys['ArrowRight']) player.x+=player.speed*dt;
+    player.x=Math.max(0,Math.min(W-player.w,player.x));
+    if(keys['Space']) shoot(now);
+
+    for(let i=bullets.length-1;i>=0;i--){
+      bullets[i].y-=bullets[i].speed*dt;
+      if(bullets[i].y+bullets[i].h<0) bullets.splice(i,1);
+    }
+
+    if(now-lastSpawn>spawnInterval){
+      spawnEnemy();
+      lastSpawn=now;
+      if(spawnInterval>350) spawnInterval*=0.995;
+    }
+
+    const elapsed=(now-gameStartTime)/1000;
+    const timeMultiplier=1+elapsed*0.05;
+
+    for(let i=enemies.length-1;i>=0;i--){
+      let en=enemies[i];
+      en.y+=en.speed*dt*timeMultiplier;
+
+      if(en.y+en.h>=H || rectsOverlap(player,en)){
+        gameOver=true;
+        gameOverSound.currentTime=0; gameOverSound.play();
+        return;
+      }
+
+      for(let j=bullets.length-1;j>=0;j--){
+        if(rectsOverlap(bullets[j],en)){
+          enemies.splice(i,1);
+          bullets.splice(j,1);
+          score++;
+          hitSound.currentTime=0; hitSound.play();
+          break;
+        }
+      }
+    }
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+
+    ctx.fillStyle='#7CFC00';
+    ctx.fillRect(player.x,player.y,player.w,player.h);
+
+    ctx.fillStyle='#ffd54f';
+    bullets.forEach(b=>ctx.fillRect(b.x,b.y,b.w,b.h));
+
+    ctx.fillStyle='#ff5c5c';
+    enemies.forEach(e=>ctx.fillRect(e.x,e.y,e.w,e.h));
+
+    ctx.fillStyle='#fff';
+    ctx.font='18px Arial';
+    ctx.fillText('Score: '+score,10,24);
+
+    if(gameOver){
+      ctx.fillStyle='rgba(0,0,0,0.6)';
+      ctx.fillRect(0,0,W,H);
+      ctx.fillStyle='#fff';
+      ctx.font='28px Arial'; ctx.textAlign='center';
+      ctx.fillText('GAME OVER',W/2,H/2-10);
+      ctx.font='16px Arial';
+      ctx.fillText('Score: '+score,W/2,H/2+20);
+      ctx.font='14px Arial';
+      ctx.fillText('Press Enter to restart',W/2,H/2+50);
+      ctx.textAlign='start';
+    }
+  }
+
+  function resetGame(){
+    bullets=[]; enemies=[]; score=0;
+    spawnInterval=900; lastShot=0;
+    lastSpawn=performance.now();
+    gameStartTime=performance.now();
+    gameOver=false; paused=false;
+    menu.style.display='none';
+  }
+
+  function gameLoop(timestamp){
+    if(!lastTime) lastTime=timestamp;
+    const dt=Math.min(1/15,(timestamp-lastTime)/1000);
+    update(dt,timestamp);
+    draw();
+    lastTime=timestamp;
+    requestAnimationFrame(gameLoop);
+  }
+
+  lastSpawn=performance.now();
+  requestAnimationFrame(gameLoop);
+})();
+</script>
+</body>
+</html >
